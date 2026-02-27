@@ -50,7 +50,29 @@ def login():
         return jsonify({"message": "Login Successful"})
     else:
         return jsonify({"message": "Invalid Email or Password"})
+# --- UPDATE PROFILE ---
+@app.route("/update_profile", methods=["PUT"])
+def update_profile():
+    try:
+        data = request.json
+        email = data.get("email")
+        name = data.get("name")
+        
+        if not email or not name:
+            return jsonify({"message": "Email and Name are required"}), 400
 
+        # SQL to update the user's name based on their email
+        sql = "UPDATE users SET name=%s WHERE email=%s"
+        cursor.execute(sql, (name, email))
+        db.commit()
+
+        if cursor.rowcount > 0:
+            return jsonify({"message": "Profile Updated Successfully"})
+        else:
+            return jsonify({"message": "User not found"}), 404
+            
+    except Exception as e:
+        return jsonify({"message": f"Error: {str(e)}"}), 500
 
 # ---------------- ADD WELLNESS ----------------
 @app.route("/add_wellness", methods=["POST"])
