@@ -4,7 +4,7 @@ conn = mysql.connector.connect(
     host="localhost",
     user="root",
     password="",
-    database="healthy_food_db"
+    database="healthyfoodhabitapp"
 )
 
 cursor = conn.cursor()
@@ -14,24 +14,28 @@ cursor.execute("""
 CREATE TABLE IF NOT EXISTS users (
  id INT AUTO_INCREMENT PRIMARY KEY,
  name VARCHAR(100),
- email VARCHAR(100),
- password VARCHAR(100)
+ email VARCHAR(100) UNIQUE,
+ password VARCHAR(100),
+ age INT,
+ height FLOAT,
+ weight FLOAT,
+ gender VARCHAR(20),
+ goal VARCHAR(100)
 )
 """)
 
-# MEALS TABLE
+# FOOD LOGS TABLE
 cursor.execute("""
-CREATE TABLE IF NOT EXISTS meals (
+CREATE TABLE IF NOT EXISTS food_logs (
  id INT AUTO_INCREMENT PRIMARY KEY,
  user_id INT,
- breakfast TEXT,
- lunch TEXT,
- snacks TEXT,
- dinner TEXT,
+ meal_type VARCHAR(50),
+ food_text TEXT,
  calories FLOAT,
  protein FLOAT,
  carbs FLOAT,
- fats FLOAT
+ fat FLOAT,
+ created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 )
 """)
 

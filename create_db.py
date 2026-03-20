@@ -8,6 +8,6 @@ conn = mysql.connector.connect(
 
 cursor = conn.cursor()
 
-cursor.execute("CREATE DATABASE healthy_food_db")
+cursor.execute("CREATE DATABASE IF NOT EXISTS healthyfoodhabitapp")
 
 print("Database Created")

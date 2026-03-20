@@ -1,315 +1,614 @@
 from flask import Flask, request, jsonify
 import mysql.connector
+import requests
+import re
+from datetime import date
+from flask_mail import Mail, Message
+import random
 
 app = Flask(__name__)
 
-db = mysql.connector.connect(
-    host="localhost",
-    user="root",
-    password="",
-    database="healthy_food_db"
-)
+# ---------------- EMAIL CONFIG ----------------
+app.config['MAIL_SERVER'] = 'smtp.gmail.com'
+app.config['MAIL_PORT'] = 587
+app.config['MAIL_USE_TLS'] = True
+app.config['MAIL_USERNAME'] = 'ranjithavangaveeti@gmail.com'
+app.config['MAIL_PASSWORD'] = 'abxyurcdkhprgbcx'
 
-cursor = db.cursor(dictionary=True)
+mail = Mail(app)
 
+# ---------------- API KEY ----------------
+API_KEY = "tTgJqNFFeULlBzJJ18Z+fA==WalvHu2K4pA1RCB1"
 
+# ---------------- DATABASE CONNECTION ----------------
+def get_db():
+    try:
+        conn = mysql.connector.connect(
+            host="localhost",
+            user="root",
+            password="",
+            database="healthyfoodhabitapp"
+        )
+        return conn
+    except mysql.connector.Error as err:
+        print("Database connection failed:", err)
+        return None
+
+# ---------------- BMI FUNCTION ----------------
+def calculate_bmi(weight, height):
+    height_m = height / 100
+    bmi = round(weight / (height_m * height_m), 2)
+
+    if bmi < 18.5:
+        category = "Underweight"
+    elif bmi < 24.9:
+        category = "Normal"
+    elif bmi < 29.9:
+        category = "Overweight"
+    else:
+        category = "Obese"
+
+    return bmi, category
+
+# ---------------- PASSWORD VALIDATION ----------------
+def is_password_strong(password):
+    # Must contain alphabet, number and special character
+    if not password:
+        return False
+
+    has_letter = re.search(r"[A-Za-z]", password)
+    has_digit = re.search(r"\d", password)
+    has_special = re.search(r"[@#_$!%*?&]", password)
+
+    return has_letter and has_digit and has_special
+
+# ---------------- SIMPLE FOOD ANALYSIS ----------------
+def analyze_food(food_text):
+
+    food_text = food_text.lower()
+    foods = re.split(r'[ ,]+', food_text)
+
+    total_calories = total_protein = total_carbs = total_fat = 0
+
+    for food in foods:
+
+        if food in ["egg", "eggs"]:
+            calories, protein, carbs, fat = 155, 13, 1, 11
+
+        elif food == "rice":
+            calories, protein, carbs, fat = 206, 4, 45, 1
+
+        elif food == "milk":
+            calories, protein, carbs, fat = 103, 8, 12, 2
+
+        elif food == "banana":
+            calories, protein, carbs, fat = 89, 1, 23, 0
+
+        elif food == "chicken":
+            calories, protein, carbs, fat = 239, 27, 0, 14
+
+        else:
+            continue
+
+        total_calories += calories
+        total_protein += protein
+        total_carbs += carbs
+        total_fat += fat
+
+    return {
+        "calories": total_calories,
+        "protein": total_protein,
+        "carbs": total_carbs,
+        "fat": total_fat
+    }
+
+# ---------------- NUTRITION API ----------------
+def get_nutrition_ai(food_text):
+
+    try:
+        response = requests.get(
+            "https://api.calorieninjas.com/v1/nutrition",
+            headers={"X-Api-Key": API_KEY},
+            params={"query": food_text}
+        )
+
+        if response.status_code != 200:
+            return None
+
+        data = response.json()
+        items = data.get("items", [])
+
+        if not items:
+            return None
+
+        calories = sum(item.get("calories", 0) for item in items)
+        protein = sum(item.get("protein_g", 0) for item in items)
+        carbs = sum(item.get("carbohydrates_total_g", 0) for item in items)
+        fat = sum(item.get("fat_total_g", 0) for item in items)
+
+        return {
+            "calories": calories,
+            "protein": protein,
+            "carbs": carbs,
+            "fat": fat
+        }
+
+    except Exception as e:
+        print("API ERROR:", e)
+        return None
+
+# ---------------- AI ADVICE ----------------
+def generate_ai_advice(calories, protein, carbs, fat, meal_type):
+    # Ensure meal_type is treated as a string
+    meal_type = str(meal_type).lower() 
+    
+    advice_list = []
+    
+    if meal_type == "daily":
+        if calories > 2500:
+            advice_list.append("Your total calories for today are high. ")
+        
+
+    # Meal specific advice
+    if meal_type == "breakfast":
+        if fat > 15:
+            advice_list.append("Try to avoid morning oily food. Opt for a lighter start for better energy.")
+        elif protein < 10:
+            advice_list.append("Your breakfast is low in protein. Adding eggs or sprouts can help.")
+        else:
+            advice_list.append("Great start! This breakfast looks light and healthy.")
+
+    elif meal_type == "lunch":
+        if carbs > 100:
+            advice_list.append("This lunch is high in carbs. Try adding more fiber-rich veggies.")
+        elif protein < 15:
+            advice_list.append("Consider adding dal or lean protein to your lunch to feel fuller.")
+        else:
+            advice_list.append("Excellent! Your lunch is well-balanced.")
+
+    elif meal_type == "snack":
+        if calories > 300:
+            advice_list.append("This snack is quite heavy. Try fruit or nuts for a healthier pick-me-up.")
+        else:
+            advice_list.append("Nice choice for a healthy snack.")
+
+    elif meal_type == "dinner":
+        if fat > 20 or calories > 600:
+            advice_list.append("Try to keep dinner light and avoid oily food for better sleep and digestion.")
+        else:
+            advice_list.append("Perfect choice for a light and healthy dinner.")
+
+    # Generic fallback if no specific rule is met
+    if not advice_list:
+        advice_list.append("This meal seems balanced. Remember to stay hydrated!")
+
+    return " ".join(advice_list)
+
+# ---------------- ROOT ----------------
 @app.route("/")
 def home():
-    return "Healthy Food Backend Running ✅"
+    return "Healthy Food Habit Backend Running"
 
+# ----------------FORGOT PASSWORD ----------------
+import random
+from flask_mail import Message
+
+@app.route('/forgot_password', methods=['POST'])
+def forgot_password():
+    try:
+        data = request.json
+        email = data.get("email")
+
+        db = get_db()
+        cursor = db.cursor()
+
+        cursor.execute("SELECT * FROM users WHERE email=%s", (email,))
+        user = cursor.fetchone()
+
+        if not user:
+            cursor.close()
+            db.close()
+            return jsonify({"message": "Email not found"})
+
+        otp = random.randint(100000, 999999)
+
+        cursor.execute(
+            "UPDATE users SET otp=%s WHERE email=%s",
+            (otp, email)
+        )
+        db.commit()
+
+        # SEND EMAIL
+        msg = Message(
+            subject="Password Reset OTP",
+            sender="yourgmail@gmail.com",
+            recipients=[email]
+        )
+
+        msg.body = f"Your OTP for password reset is: {otp}"
+
+        mail.send(msg)
+
+        cursor.close()
+        db.close()
+
+        return jsonify({"message": "OTP sent to email"})
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+#------------------------RESET PASSWORD-------------------
+@app.route('/reset_password', methods=['POST'])
+def reset_password():
+    try:
+        data = request.json
+        email = data.get("email")
+        new_password = data.get("password")
+
+        # PASSWORD VALIDATION
+        if not is_password_strong(new_password):
+            return jsonify({
+                "status": "fail",
+                "message": "Password must contain alphabet, number and special character"
+            })
+
+        db = get_db()
+        cursor = db.cursor()
+
+        cursor.execute(
+            "UPDATE users SET password=%s WHERE email=%s",
+            (new_password, email)
+        )
+
+        db.commit()
+
+        cursor.close()
+        db.close()
+
+        return jsonify({
+            "status": "success",
+            "message": "Password updated successfully"
+        })
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    
+#------------------------VERIFT OTP------------------
+@app.route('/verify_otp', methods=['POST'])
+def verify_otp():
+    try:
+        data = request.json
+        email = data.get("email")
+        otp = data.get("otp")
+
+        db = get_db()
+        cursor = db.cursor()
+
+        cursor.execute(
+            "SELECT * FROM users WHERE email=%s AND otp=%s",
+            (email, otp)
+        )
+
+        user = cursor.fetchone()
+
+        cursor.close()
+        db.close()
+
+        if user:
+            return jsonify({"message": "OTP verified"})
+        else:
+            return jsonify({"message": "Invalid OTP"})
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 # ---------------- REGISTER ----------------
 @app.route("/register", methods=["POST"])
 def register():
 
-    data = request.json
-    name = data["name"]
-    email = data["email"]
-    password = data["password"]
+    data = request.get_json()
+    password = data.get("password", "")
 
-    sql = "INSERT INTO users (name,email,password) VALUES (%s,%s,%s)"
-    cursor.execute(sql, (name, email, password))
+    # PASSWORD VALIDATION
+    if not is_password_strong(password):
+        return jsonify({
+            "status": "fail",
+            "message": "Password must contain alphabet, number and special character"
+        })
+
+    db = get_db()
+
+    if not db:
+        return jsonify({"status": "error", "message": "Database not connected"})
+
+    cursor = db.cursor(dictionary=True)
+
+    cursor.execute("SELECT id FROM users WHERE email=%s", (data["email"],))
+
+    if cursor.fetchone():
+        cursor.close()
+        db.close()
+        return jsonify({"status": "fail", "message": "Email already registered"})
+
+    cursor.execute(
+        "INSERT INTO users (name,email,password,goal) VALUES (%s,%s,%s,%s)",
+        (data["name"], data["email"], data["password"], data["goal"])
+    )
+
     db.commit()
+    cursor.close()
+    db.close()
 
-    return jsonify({"message": "User Registered"})
-
+    return jsonify({"status": "success", "message": "Registered Successfully"})
 
 # ---------------- LOGIN ----------------
 @app.route("/login", methods=["POST"])
 def login():
 
-    data = request.json
-    email = data["email"]
-    password = data["password"]
+    data = request.get_json()
+    db = get_db()
 
-    sql = "SELECT * FROM users WHERE email=%s AND password=%s"
-    cursor.execute(sql, (email, password))
+    if not db:
+        return jsonify({"status": "error", "message": "Database not connected"})
+
+    cursor = db.cursor(dictionary=True)
+
+    cursor.execute("SELECT * FROM users WHERE email=%s", (data["email"],))
     user = cursor.fetchone()
 
-    if user:
-        return jsonify({"message": "Login Successful"})
+    cursor.close()
+    db.close()
+
+    if user and user["password"] == data["password"]:
+        return jsonify({
+            "status": "success",
+            "user_id": user["id"],
+            "name": user["name"]
+        })
     else:
-        return jsonify({"message": "Invalid Email or Password"})
-# --- UPDATE PROFILE ---
-@app.route("/update_profile", methods=["PUT"])
+        return jsonify({"status": "fail", "message": "Invalid credentials"})
+
+# ---------------- update profile----------------
+@app.route("/update_profile", methods=["POST"])
 def update_profile():
-    try:
-        data = request.json
-        email = data.get("email")
-        name = data.get("name")
-        
-        if not email or not name:
-            return jsonify({"message": "Email and Name are required"}), 400
 
-        # SQL to update the user's name based on their email
-        sql = "UPDATE users SET name=%s WHERE email=%s"
-        cursor.execute(sql, (name, email))
-        db.commit()
+    data = request.get_json()
 
-        if cursor.rowcount > 0:
-            return jsonify({"message": "Profile Updated Successfully"})
-        else:
-            return jsonify({"message": "User not found"}), 404
-            
-    except Exception as e:
-        return jsonify({"message": f"Error: {str(e)}"}), 500
+    user_id = data.get("user_id")
+    name = data.get("name")
+    age = data.get("age")
+    height = data.get("height")
+    weight = data.get("weight")
+    gender = data.get("gender")
 
-# ---------------- ADD WELLNESS ----------------
-@app.route("/add_wellness", methods=["POST"])
-def add_wellness():
+    db = get_db()
+    cursor = db.cursor()
 
-    try:
-        data = request.json
+    cursor.execute("""
+        UPDATE users
+        SET name=%s, age=%s, height=%s, weight=%s, gender=%s
+        WHERE id=%s
+    """, (name, age, height, weight, gender, user_id))
 
-        sql = """INSERT INTO wellness
-        (user_id, sleep_hours, water_intake, health_score, recommendations)
-        VALUES (%s,%s,%s,%s,%s)"""
+    db.commit()
 
-        values = (
-            data.get("user_id"),
-            data.get("sleep_hours"),
-            data.get("water_intake"),
-            data.get("health_score"),
-            data.get("recommendations")
-        )
+    cursor.close()
+    db.close()
 
-        cursor.execute(sql, values)
-        db.commit()
+    return jsonify({
+        "status": "success",
+        "message": "Profile updated"
+    })
 
-        return jsonify({"message": "Wellness Added Successfully"})
-
-    except Exception as e:
-        return jsonify({"error": str(e)})
-
-
+# ---------------- ADD MEAL ----------------
 @app.route("/add_meal", methods=["POST"])
 def add_meal():
 
-    data = request.get_json(force=True)
-    print("Received Data:", data)
-
-    if not data:
-        return jsonify({"error": "No JSON received"}), 400
+    data = request.get_json()
 
     user_id = data.get("user_id")
-    breakfast = data.get("breakfast")
-    lunch = data.get("lunch")
-    snacks = data.get("snacks")
-    dinner = data.get("dinner")
-    calories = data.get("calories")
-    protein = data.get("protein")
-    carbs = data.get("carbs")
-    fats = data.get("fats")
+    meal_type = data.get("meal_type")
+    food_text = data.get("food_text")
 
-    if user_id is None:
-        return jsonify({"error": "user_id is required"}), 400
+    if not user_id:
+        return jsonify({"error": "user_id missing"}), 400
 
-    sql = """INSERT INTO meals 
-    (user_id, breakfast, lunch, snacks, dinner, calories, protein, carbs, fats)
-    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)"""
+    if not food_text:
+        return jsonify({"error": "food text missing"}), 400
 
-    values = (user_id, breakfast, lunch, snacks, dinner, calories, protein, carbs, fats)
+    if not meal_type:
+        return jsonify({"error": "meal_type missing"}), 400
 
-    cursor.execute(sql, values)
-    db.commit()
+    food_text = food_text.lower().strip()
 
-    return jsonify({"message": "Meal Added Successfully"})
+    nutrition = get_nutrition_ai(food_text)
 
-# ---------------- GET MEALS ----------------
-@app.route("/get_meals/<int:user_id>", methods=["GET"])
-def get_meals(user_id):
-
-    sql = "SELECT * FROM meals WHERE user_id = %s"
-    cursor.execute(sql, (user_id,))
-    rows = cursor.fetchall()
-
-    result = []
-
-    for row in rows:
-        result.append({
-            "id": row["id"],
-            "user_id": row["user_id"],
-            "breakfast": row["breakfast"],
-            "lunch": row["lunch"],
-            "snacks": row["snacks"],
-            "dinner": row["dinner"],
-            "calories": row["calories"],
-            "protein": row["protein"],
-            "carbs": row["carbs"],
-            "fats": row["fats"]
-        })
-
-    return jsonify(result)
-
-   
-
-# ---------------- GET WELLNESS ----------------
-@app.route("/wellness/<int:user_id>", methods=["GET"])
-def get_wellness(user_id):
-
-    sql = "SELECT * FROM wellness WHERE user_id=%s"
-    cursor.execute(sql, (user_id,))
-    data = cursor.fetchall()
-
-    return jsonify(data)
-
-# ---------------- UPDATE MEAL ----------------
-@app.route("/update_meal/<int:meal_id>", methods=["PUT"])
-def update_meal(meal_id):
-
-    try:
-        data = request.json
-
-        sql = """UPDATE meals SET
-        breakfast=%s,
-        lunch=%s,
-        snacks=%s,
-        dinner=%s,
-        calories=%s,
-        protein=%s,
-        carbs=%s,
-        fats=%s
-        WHERE id=%s"""
-
-        values = (
-            data.get("breakfast"),
-            data.get("lunch"),
-            data.get("snacks"),
-            data.get("dinner"),
-            data.get("calories"),
-            data.get("protein"),
-            data.get("carbs"),
-            data.get("fats"),
-            meal_id
-        )
-
-        cursor.execute(sql, values)
-        db.commit()
-
-        return jsonify({"message": "Meal Updated Successfully"})
-
-    except Exception as e:
-        return jsonify({"error": str(e)})
-    
-    # ---------------- DELETE MEAL ----------------
-@app.route("/delete_meal/<int:meal_id>", methods=["DELETE"])
-def delete_meal(meal_id):
-
-    try:
-        sql = "DELETE FROM meals WHERE id=%s"
-        cursor.execute(sql, (meal_id,))
-        db.commit()
-
-        return jsonify({"message": "Meal Deleted Successfully"})
-
-    except Exception as e:
-        return jsonify({"error": str(e)})
-    
-    # ---------------- ANALYZE HEALTH ----------------
-@app.route("/analyze/<int:user_id>", methods=["GET"])
-def analyze(user_id):
-
-    try:
-        # Get latest meal
-        cursor.execute("SELECT * FROM meals WHERE user_id=%s ORDER BY id DESC LIMIT 1", (user_id,))
-        meal = cursor.fetchone()
-
-        # Get latest wellness
-        cursor.execute("SELECT * FROM wellness WHERE user_id=%s ORDER BY id DESC LIMIT 1", (user_id,))
-        wellness = cursor.fetchone()
-
-        if not meal or not wellness:
-            return jsonify({"message": "Meal or Wellness data not found"})
-
-        calories = float(meal["calories"])
-        protein = float(meal["protein"])
-        water = float(wellness["water_intake"])
-        sleep = float(wellness["sleep_hours"])
-
-        score = 100
-        recommendations = []
-
-        # Simple AI Rules
-        if calories > 2500:
-            score -= 20
-            recommendations.append("Reduce calorie intake")
-
-        if protein < 40:
-            score -= 20
-            recommendations.append("Increase protein-rich foods")
-
-        if water < 2:
-            score -= 20
-            recommendations.append("Drink more water")
-
-        if sleep < 6:
-            score -= 20
-            recommendations.append("Improve sleep duration")
-
+    if nutrition is None:
         return jsonify({
-            "health_score": score,
-            "recommendations": recommendations
+            "status": "fail",
+            "message": "Food not recognized"
         })
 
-    except Exception as e:
-        return jsonify({"error": str(e)})
-    
-@app.route("/recommend/<int:user_id>", methods=["GET"])
-def recommend(user_id):
+    ai_tip = generate_ai_advice(
+        nutrition["calories"],
+        nutrition["protein"],
+        nutrition["carbs"],
+        nutrition["fat"],
+        meal_type
+    )
 
-    cursor.execute("SELECT calories, protein, carbs, fats FROM meals WHERE user_id=%s", (user_id,))
-    rows = cursor.fetchall()
+    db = get_db()
 
-    if not rows:
-        return jsonify({"message": "No meal data found for recommendation"})
+    if not db:
+        return jsonify({"status": "error", "message": "Database not connected"})
 
-    total_calories = 0
-    total_protein = 0
-    total_carbs = 0
-    total_fats = 0
+    cursor = db.cursor()
 
-    for row in rows:
-        total_calories += row["calories"]
-        total_protein += row["protein"]
-        total_carbs += row["carbs"]
-        total_fats += row["fats"]
+    cursor.execute("""
+        INSERT INTO meals (user_id, meal_type, food_text, calories, protein, carbs, fat)
+        VALUES (%s,%s,%s,%s,%s,%s,%s)
+    """, (
+        user_id,
+        meal_type,
+        food_text,
+        nutrition["calories"],
+        nutrition["protein"],
+        nutrition["carbs"],
+        nutrition["fat"]
+    ))
 
-    # Simple AI Logic
-    if total_calories > 2500:
-        advice = "Your calorie intake is high. Try reducing fried foods."
-    elif total_calories < 1500:
-        advice = "Your calorie intake is low. Increase protein-rich foods."
-    else:
-        advice = "Your diet looks balanced. Keep maintaining it!"
+    db.commit()
+    cursor.close()
+    db.close()
 
     return jsonify({
-        "total_calories": total_calories,
-        "total_protein": total_protein,
-        "total_carbs": total_carbs,
-        "total_fats": total_fats,
-        "recommendation": advice
+        "status": "success",
+        "meal_type": meal_type,
+        "food": food_text,
+        "nutrition": nutrition,
+        "ai_tip": ai_tip
     })
 
 
+# ---------------- VIEW INSIGHTS ----------------
+@app.route("/view_insights", methods=["POST"])
+def view_insights():
+
+    data = request.get_json()
+    user_id = data.get("user_id")
+
+    if not user_id or user_id == -1:
+        return jsonify({"status": "error", "message": "Invalid User ID"}), 400
+    
+    db = get_db()
+    cursor = db.cursor(dictionary=True)
+
+    cursor.execute("""
+        SELECT meal_type, food_text, calories, protein, carbs, fat
+        FROM meals
+        WHERE user_id=%s AND DATE(created_at)=CURDATE()
+    """, (user_id,))
+
+    meals = cursor.fetchall()
+    # If no meals logged today
+    if not meals:
+        cursor.close()
+        db.close()
+        return jsonify({
+            "health_percentage": 0,
+            "nutrition_totals": {
+                "calories": 0,
+                "protein": 0,
+                "carbs": 0,
+                "fat": 0
+            },
+            "meal_breakdown": {
+                "breakfast": [],
+                "lunch": [],
+                "snack": [],
+                "dinner": []
+            },
+            "ai_suggestion": "Log your first meal to see insights!"
+        })
+    total_cal = 0
+    total_protein = 0
+    total_carbs = 0
+    total_fat = 0
+
+    meal_breakdown = {
+        "breakfast": [],
+        "lunch": [],
+        "snack": [],
+        "dinner": []
+    }
+
+    for m in meals:
+
+        total_cal += m["calories"]
+        total_protein += m["protein"]
+        total_carbs += m["carbs"]
+        total_fat += m["fat"]
+
+        meal_type = m["meal_type"].lower()
+
+        meal_data = {
+            "food": m["food_text"],
+            "calories": m["calories"]
+        }
+
+        if meal_type in meal_breakdown:
+            meal_breakdown[meal_type].append(meal_data)
+
+    # ---------- Nutrient Percentage ----------
+    nutrient_total = total_protein + total_carbs + total_fat
+
+    if nutrient_total == 0:
+        protein_percent = carbs_percent = fat_percent = 0
+    else:
+        protein_percent = round((total_protein / nutrient_total) * 100)
+        carbs_percent = round((total_carbs / nutrient_total) * 100)
+        fat_percent = round((total_fat / nutrient_total) * 100)
+
+    nutrient_percentages = {
+        "protein_percent": protein_percent,
+        "carbs_percent": carbs_percent,
+        "fat_percent": fat_percent
+    }
+
+    target_calories = 2000
+    health_percent = min(100, round((total_cal / target_calories) * 100))
+
+    ai_suggestion = generate_ai_advice(
+        total_cal,
+        total_protein,
+        total_carbs,
+        total_fat,
+        "daily"
+    )
+
+    cursor.close()
+    db.close()
+
+    return jsonify({
+        "health_percentage": health_percent,
+
+        "nutrition_totals": {
+            "calories": total_cal,
+            "protein": total_protein,
+            "carbs": total_carbs,
+            "fat": total_fat
+        },
+
+        "nutrient_percentages": nutrient_percentages,
+
+        "meal_breakdown": meal_breakdown,
+
+        "ai_suggestion": ai_suggestion
+    })
+
+# ---------------- GET TODAY MEALS ----------------
+@app.route("/meals/today/<int:user_id>", methods=["GET"])
+def get_today_meals(user_id):
+
+    db = get_db()
+    cursor = db.cursor(dictionary=True)
+
+    cursor.execute("""
+        SELECT meal_type, food_text, calories, protein, carbs, fat
+        FROM meals
+        WHERE user_id=%s AND DATE(created_at)=CURDATE()
+    """, (user_id,))
+
+    meals = cursor.fetchall()
+
+    cursor.close()
+    db.close()
+
+    return jsonify({
+        "status": "success",
+        "meals": meals
+    })
+
+# ---------------- MAIN ----------------
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)

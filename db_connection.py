@@ -5,6 +5,6 @@ def get_connection():
         host="localhost",
         user="root",
         password="",
-        database="healthy_food_db"
+        database="healthyfoodhabitapp"
     )
     return conn
